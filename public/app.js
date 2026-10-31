@@ -107,7 +107,7 @@ function game() {
     return `<label class="field" style="flex:1 1 180px;max-width:260px"><span>${label}</span><input id="round-${name}" data-code="${state.code}" data-round="${state.round}" type="number" min="1" max="600" step="1" value="${escapeHtml(value)}" required inputmode="numeric"></label>`;
   }).join('') : '';
   const action = admin ? (state.phase === 'ready' ? button('Начать ответ →', 'start-answer', true, !state.players.length) : state.phase === 'open' ? button('Завершить раунд', 'end') : state.phase === 'speaking' ? button('Завершить ответ', 'finish-answer') : state.phase === 'speaker-finished' ? `${button('Продолжить ответ →', 'continue', true)}${button('Завершить раунд', 'end')}` : state.phase === 'ended' ? button('Следующий раунд →', 'next', true) : '') : '';
-  const gameActions = state.phase === 'finished' ? (admin ? button('Создать новую игру →', 'create', true) : button('На главную →', 'leave', true)) : admin ? `${timerSettings}${action}${button('Завершить игру', 'finish-game')}` : `${button('Сменить название команды', 'rename-team')}${button('Выйти из игры', 'leave')}`;
+  const gameActions = state.phase === 'finished' ? (admin ? `${button('На главную →', 'leave', true)}${button('Создать новую игру →', 'create')}` : button('На главную →', 'leave', true)) : admin ? `${timerSettings}${action}${button('Завершить игру', 'finish-game')}` : `${button('Сменить название команды', 'rename-team')}${button('Выйти из игры', 'leave')}`;
   root.innerHTML = `<section class="page ${display ? 'display-mode' : ''}"><div class="page-head"><div><div class="eyebrow">${display ? 'ГЛАВНЫЙ ЭКРАН' : admin ? 'ПАНЕЛЬ ВЕДУЩЕГО' : 'ЭКРАН КОМАНДЫ'}</div><h2 class="game-heading">${escapeHtml(state.title)}</h2></div><div class="round-tag">${state.phase === 'finished' ? 'ИГРА ЗАВЕРШЕНА' : `РАУНД ${state.round}`}　/　КОД ${state.code}</div></div><div class="${display ? '' : 'game-layout'}"><div><div class="card main-stage"><div class="stage-kicker">● ${kicker}</div><div class="stage-title">${title}</div><p class="stage-desc">${desc}</p>${timerDeadline ? `<div class="timer" data-timer="${timerDeadline}">${number(timerDeadline)}</div><div class="progress"><span data-progress="${timerDeadline}"></span></div>` : ''}</div>${showAnswer ? `<button class="btn btn-primary answer-button" data-action="press" ${me?.pressed ? 'disabled' : ''}>${me?.pressed ? 'Команда уже нажала' : 'Ответить'}</button>` : ''}${!admin && !display && state.phase === 'preparing' ? '<p class="sub" style="margin-top:20px">Кнопка ответа пока заблокирована.</p>' : ''}${!display && gameActions ? `<div class="control-row">${gameActions}</div>` : ''}</div>${display ? '' : `<aside class="side-card"><div class="card"><div class="card-label">КОМАНДЫ · ${state.players.length}</div>${playersMarkup(state.players)}</div>${admin ? `<a class="btn btn-ghost" href="/?display=${state.code}" target="_blank" rel="noopener">Открыть экран игры →</a>` : ''}</aside>`}</div>${display ? `<div class="display-meta"><span>ПУЛЬС / LIVE</span><span class="small-code">${state.code}</span></div>` : ''}</section>`;
   updateTimers();
 }
@@ -136,11 +136,16 @@ async function load() {
     state = next;
     document.title = `${next.title || 'Пульс'} — Пульс`;
     if (session) {
-      const name = next.players.find(p => p.id === next.me)?.name;
-      if (session.role !== next.role || session.name !== name || session.title !== next.title || !savedSessions().some(saved => saved.token === session.token)) {
-        session = { ...session, role: next.role, name, title: next.title };
-        sessionStorage.setItem('pulse-session', JSON.stringify(session));
-        rememberSession(session);
+      if (next.phase === 'finished') {
+        forgetSession(session);
+        sessionStorage.removeItem('pulse-session');
+      } else {
+        const name = next.players.find(p => p.id === next.me)?.name;
+        if (session.role !== next.role || session.name !== name || session.title !== next.title || !savedSessions().some(saved => saved.token === session.token)) {
+          session = { ...session, role: next.role, name, title: next.title };
+          sessionStorage.setItem('pulse-session', JSON.stringify(session));
+          rememberSession(session);
+        }
       }
     }
     document.querySelector('#connection').hidden = true;
