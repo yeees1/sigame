@@ -31,7 +31,7 @@ function advance(room) {
   const time = now();
   let changed = false;
   if (room.phase === 'preparing' && time >= room.prepUntil) {
-    room.phase = 'open'; room.answerUntil = room.prepUntil + 40000; room.prepUntil = null; changed = true;
+    room.phase = 'open'; room.answerUntil = room.prepUntil + room.roundSeconds * 1000; room.prepUntil = null; changed = true;
   }
   if (room.phase === 'open' && room.answerUntil && time >= room.answerUntil) {
     room.phase = 'ended'; room.answerUntil = null; room.answerRemainingMs = 0; changed = true;
@@ -48,7 +48,7 @@ function snapshot(room, auth) {
   if (!admin && !player) return null;
   return {
     code: room.code, title: room.title, role: admin ? 'admin' : 'player', me: player?.id,
-    phase: room.phase, round: room.round, serverNow: now(),
+    phase: room.phase, round: room.round, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds, serverNow: now(),
     prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs, speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
     players: room.players.map(p => ({ id: p.id, name: p.name, connected: now() - p.lastSeen < 5000, pressed: p.pressed }))
@@ -56,7 +56,7 @@ function snapshot(room, auth) {
 }
 function displaySnapshot(room) {
   advance(room);
-  return { code: room.code, title: room.title, role: 'display', phase: room.phase, round: room.round,
+  return { code: room.code, title: room.title, role: 'display', phase: room.phase, round: room.round, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds,
     serverNow: now(), prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs,
     speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
@@ -83,8 +83,12 @@ async function api(req, res, url) {
     if (!title) return fail(res, 400, 'Введите название игры');
     const password = body.password;
     if (typeof password !== 'string' || password.length < 8 || password.length > 128) return fail(res, 400, 'Пароль должен содержать от 8 до 128 символов');
+    const answerSeconds = body.answerSeconds === undefined ? 15 : body.answerSeconds;
+    const roundSeconds = body.roundSeconds === undefined ? 40 : body.roundSeconds;
+    if (!Number.isInteger(answerSeconds) || answerSeconds < 1 || answerSeconds > 600) return fail(res, 400, 'Время ответа: от 1 до 600 секунд');
+    if (!Number.isInteger(roundSeconds) || roundSeconds < 1 || roundSeconds > 600) return fail(res, 400, 'Время раунда: от 1 до 600 секунд');
     const salt = crypto.randomBytes(16);
-    const room = { code: makeCode(), title, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, answerRemainingMs: null, speakerUntil: null, speaker: null, timer: null };
+    const room = { code: makeCode(), title, answerSeconds, roundSeconds, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, answerRemainingMs: null, speakerUntil: null, speaker: null, timer: null };
     rooms.set(room.code, room);
     return send(res, 200, { code: room.code, title, token: room.adminToken });
   }
@@ -157,7 +161,7 @@ async function api(req, res, url) {
     if (player.pressed) return fail(res, 409, 'Ваша команда уже нажала в этом раунде');
     player.pressed = true;
     room.answerRemainingMs = Math.max(0, room.answerUntil - now()); room.answerUntil = null;
-    room.phase = 'speaking'; room.speaker = player.id; room.speakerUntil = now() + 15000; schedule(room);
+    room.phase = 'speaking'; room.speaker = player.id; room.speakerUntil = now() + room.answerSeconds * 1000; schedule(room);
     broadcast(room);
     return send(res, 200, snapshot(room, auth));
   }
@@ -168,7 +172,7 @@ async function api(req, res, url) {
   } else if (url.pathname === '/api/start-game' && room.phase === 'lobby' && room.players.length) {
     room.phase = 'ready'; room.round = 1;
   } else if (url.pathname === '/api/start-answer' && room.phase === 'ready' && room.players.length) {
-    room.phase = 'preparing'; room.prepUntil = now() + 10000; room.answerRemainingMs = 40000; schedule(room);
+    room.phase = 'preparing'; room.prepUntil = now() + 10000; room.answerRemainingMs = room.roundSeconds * 1000; schedule(room);
   } else if (url.pathname === '/api/finish-answer' && room.phase === 'speaking') {
     room.phase = 'speaker-finished'; room.speakerUntil = null; schedule(room);
   } else if (url.pathname === '/api/continue' && room.phase === 'speaker-finished') {

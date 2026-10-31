@@ -60,7 +60,7 @@ function home() {
   root.innerHTML = `<section class="hero animate-in"><div><div class="eyebrow">ИГРА НА ОСТРИЕ МОМЕНТА</div><h1>Знаете?<br><em>Нажимайте.</em></h1><p class="lead">Живая викторина, в которой всё решает момент. Соберите команды, задавайте вопросы вслух и узнайте, какая команда ответит первой.</p><div class="hero-actions"><button class="btn btn-primary" data-action="create">Создать игру <span class="arrow">→</span></button><button class="btn btn-ghost" data-action="join-screen">Войти командой <span class="arrow">→</span></button><button class="btn btn-ghost" data-action="admin-login-screen">Войти как администратор <span class="arrow">→</span></button></div></div><div class="hero-card" aria-hidden="true"><span class="card-label">ПУЛЬС / LIVE GAME</span><span class="tiny">● В ЭФИРЕ</span><div class="orb">?</div><div class="hero-card-bottom"><b>ВАШ ВЫХОД<br>БЫТЬ ПЕРВЫМИ</b><span>01:40<br>СЕКУНДЫ РЕШАЮТ</span></div></div></section><section class="steps"><div class="step"><b>01 /</b><h3>Создайте комнату</h3><p>Код и QR для быстрого подключения команд.</p></div><div class="step"><b>02 /</b><h3>Задайте вопрос</h3><p>Ведущий зачитывает вопрос и запускает отсчёт.</p></div><div class="step"><b>03 /</b><h3>Ловите момент</h3><p>Первое нажатие получает право ответить вслух.</p></div></section>`;
 }
 function createScreen(message = '') {
-  root.innerHTML = `<section class="page animate-in">${heading('НОВАЯ ИГРА', 'Назовите <em>игру</em>')}<form id="create-form" class="card join-card"><p class="sub">Название увидят команды и зрители на главном экране.</p><label class="field"><span>Название игры</span><input name="title" maxlength="60" required autocomplete="off" placeholder="Например, Большой квиз"></label><label class="field"><span>Пароль администратора</span><input name="password" type="password" minlength="8" maxlength="128" required autocomplete="new-password" placeholder="Не менее 8 символов"></label><p class="error" role="alert">${escapeHtml(message)}</p><button class="btn btn-primary" type="submit">Создать игру →</button></form></section>`;
+  root.innerHTML = `<section class="page animate-in">${heading('НОВАЯ ИГРА', 'Назовите <em>игру</em>')}<form id="create-form" class="card join-card"><p class="sub">Название увидят команды и зрители на главном экране.</p><label class="field"><span>Название игры</span><input name="title" maxlength="60" required autocomplete="off" placeholder="Например, Большой квиз"></label><label class="field"><span>Пароль администратора</span><input name="password" type="password" minlength="8" maxlength="128" required autocomplete="new-password" placeholder="Не менее 8 символов"></label><label class="field"><span>Время ответа команды, сек.</span><input name="answerSeconds" type="number" min="1" max="600" step="1" value="15" required inputmode="numeric"></label><label class="field"><span>Время на нажатия в раунде, сек.</span><input name="roundSeconds" type="number" min="1" max="600" step="1" value="40" required inputmode="numeric"></label><p class="sub">Подготовка длится 10 секунд. Таймер раунда останавливается, пока команда отвечает.</p><p class="error" role="alert">${escapeHtml(message)}</p><button class="btn btn-primary" type="submit">Создать игру →</button></form></section>`;
 }
 function adminLoginScreen(code = '', message = '') {
   root.innerHTML = `<section class="page animate-in">${heading('ВОЗВРАЩЕНИЕ ВЕДУЩЕГО', 'Войти как <em>администратор</em>')}<form id="admin-login-form" class="card join-card"><p class="sub">Введите код игры и пароль, который вы задали при создании.</p><label class="field"><span>Код игры</span><input class="code-input" name="code" maxlength="5" pattern="[A-Za-z0-9]{5}" required autocomplete="off" value="${escapeHtml(code)}" placeholder="ABCDE"></label><label class="field"><span>Пароль администратора</span><input name="password" type="password" required autocomplete="current-password"></label><p class="error" role="alert">${escapeHtml(message)}</p><button class="btn btn-primary" type="submit">Войти в игру →</button></form></section>`;
@@ -107,7 +107,7 @@ function updateTimers() {
   for (const el of document.querySelectorAll('[data-timer]')) el.textContent = number(Number(el.dataset.timer));
   for (const el of document.querySelectorAll('[data-progress]')) {
     const deadline = Number(el.dataset.progress);
-    const duration = state.phase === 'preparing' ? 10 : state.phase === 'speaking' ? 15 : 40;
+    const duration = state.phase === 'preparing' ? 10 : state.phase === 'speaking' ? state.answerSeconds : state.roundSeconds;
     el.style.width = `${Math.min(100, remaining(deadline) / duration * 100)}%`;
   }
 }
@@ -207,7 +207,9 @@ document.addEventListener('submit', async event => {
   if (event.target.id === 'create-form') {
     const title = String(data.get('title')).trim();
     const password = String(data.get('password'));
-    try { saveSession({ ...await request('/api/create', { method: 'POST', body: JSON.stringify({ title, password }) }, false), role: 'admin' }); }
+    const answerSeconds = Number(data.get('answerSeconds'));
+    const roundSeconds = Number(data.get('roundSeconds'));
+    try { saveSession({ ...await request('/api/create', { method: 'POST', body: JSON.stringify({ title, password, answerSeconds, roundSeconds }) }, false), role: 'admin' }); }
     catch (error) { createScreen(error.message); }
     return;
   }

@@ -17,7 +17,10 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('create')).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз' })).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'short' })).status, 400);
-    const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password' })).data;
+    assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 0, roundSeconds: 40 })).status, 400);
+    assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 15, roundSeconds: 601 })).status, 400);
+    assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 1.5, roundSeconds: 40 })).status, 400);
+    const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 9, roundSeconds: 55 })).data;
     const code = created.code;
     assert.match(code, /^[A-Z0-9]{5}$/);
     assert.equal((await call('admin-login', code, null, { password: 'wrong-password' })).status, 401);
@@ -25,9 +28,12 @@ test('ведущий и две команды проходят раунды с �
     const recovered = (await call('admin-login', code, null, { password: 'strong-password' })).data;
     assert.equal(recovered.token, created.token);
     assert.equal((await call('state', code, recovered.token)).data.role, 'admin');
+    assert.equal((await call('state', code, recovered.token)).data.answerSeconds, 9);
+    assert.equal((await call('state', code, recovered.token)).data.roundSeconds, 55);
     assert.equal('password' in recovered, false);
     assert.equal('passwordHash' in (await call('state', code, recovered.token)).data, false);
     assert.equal((await call('display', code)).data.title, 'Большой квиз');
+    assert.equal((await call('display', code)).data.roundSeconds, 55);
     assert.equal((await call('join', 'XXXXX', null, { teamName: 'Ошибка' })).status, 404);
     const a = (await call('join', code, null, { teamName: 'Молния' })).data;
     const b = (await call('join', code, null, { teamName: 'Знатоки' })).data;
@@ -38,10 +44,13 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('state', code, rejoined.token)).data.phase, 'preparing');
     assert.equal((await call('press', code, a.token)).status, 409);
     const room = rooms.get(code);
+    assert.equal(room.answerRemainingMs, 55000);
     room.prepUntil = Date.now() - 1;
     assert.equal((await call('state', code, a.token)).data.phase, 'open');
+    assert.ok(room.answerUntil - Date.now() > 54000);
     room.answerUntil = Date.now() + 23000;
     assert.equal((await call('press', code, a.token)).data.speaker, 'Молния');
+    assert.ok(room.speakerUntil - Date.now() > 8000 && room.speakerUntil - Date.now() <= 9000);
     assert.equal(room.answerUntil, null);
     const paused = room.answerRemainingMs;
     assert.ok(paused > 22000 && paused <= 23000);
@@ -65,6 +74,7 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('next', code, created.token)).data.round, 2);
     assert.equal((await call('state', code, a.token)).data.players.find(p => p.name === 'Молния').pressed, false);
     await call('start-answer', code, created.token);
+    assert.equal(room.answerRemainingMs, 55000);
     room.prepUntil = Date.now() - 1;
     await call('state', code, created.token);
     room.answerUntil = Date.now() + 300;
@@ -107,6 +117,8 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('display', code)).data.phase, 'finished');
 
     const second = (await call('create', null, null, { title: 'Вторая игра', password: 'strong-password' })).data;
+    assert.equal((await call('state', second.code, second.token)).data.answerSeconds, 15);
+    assert.equal((await call('state', second.code, second.token)).data.roundSeconds, 40);
     const guest = (await call('join', second.code, null, { teamName: 'Гости' })).data;
     await call('start-game', second.code, second.token);
     await call('start-answer', second.code, second.token);
