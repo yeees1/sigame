@@ -169,10 +169,12 @@ async function api(req, res, url) {
     room.phase = 'ready'; room.round = 1;
   } else if (url.pathname === '/api/start-answer' && room.phase === 'ready' && room.players.length) {
     room.phase = 'preparing'; room.prepUntil = now() + 10000; room.answerRemainingMs = 40000; schedule(room);
+  } else if (url.pathname === '/api/finish-answer' && room.phase === 'speaking') {
+    room.phase = 'speaker-finished'; room.speakerUntil = null; schedule(room);
   } else if (url.pathname === '/api/continue' && room.phase === 'speaker-finished') {
     room.phase = 'open'; room.speaker = null; room.answerUntil = now() + room.answerRemainingMs;
     schedule(room);
-  } else if (url.pathname === '/api/end' && room.phase === 'speaker-finished') {
+  } else if (url.pathname === '/api/end' && (room.phase === 'open' || room.phase === 'speaker-finished')) {
     room.phase = 'ended'; room.speaker = null; room.answerUntil = null; room.answerRemainingMs = 0; schedule(room);
   } else if (url.pathname === '/api/next' && room.phase === 'ended') {
     room.phase = 'ready'; room.round += 1; room.speaker = null; room.answerRemainingMs = null;

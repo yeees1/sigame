@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { server, rooms } = require('../index');
 
-test('ведущий и две команды проходят два раунда без очереди ответов', async () => {
+test('ведущий и две команды проходят раунды с досрочным завершением', async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   async function call(route, code, token, body = {}) {
@@ -47,8 +47,10 @@ test('ведущий и две команды проходят два раунд
     assert.ok(paused > 22000 && paused <= 23000);
     assert.equal((await call('press', code, a.token)).status, 409);
     assert.equal((await call('press', code, b.token)).status, 409);
-    room.speakerUntil = Date.now() - 1;
-    assert.equal((await call('state', code, created.token)).data.phase, 'speaker-finished');
+    assert.equal((await call('finish-answer', code, b.token)).status, 403);
+    assert.equal((await call('finish-answer', code, created.token)).data.phase, 'speaker-finished');
+    assert.equal(room.speakerUntil, null);
+    assert.equal((await call('finish-answer', code, created.token)).status, 409);
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal((await call('state', code, created.token)).data.answerRemainingMs, paused);
     assert.equal((await call('press', code, b.token)).status, 409);
@@ -80,6 +82,16 @@ test('ведущий и две команды проходят два раунд
     const ended = (await call('state', code, created.token)).data;
     assert.equal(ended.phase, 'ended');
     assert.equal('queue' in ended, false);
+    assert.equal((await call('next', code, created.token)).data.round, 3);
+    await call('start-answer', code, created.token);
+    room.prepUntil = Date.now() - 1;
+    await call('state', code, created.token);
+    assert.equal((await call('end', code, b.token)).status, 403);
+    assert.equal((await call('end', code, created.token)).data.phase, 'ended');
+    assert.equal(room.answerUntil, null);
+    assert.equal((await call('state', code, a.token)).data.phase, 'ended');
+    assert.equal((await call('display', code)).data.phase, 'ended');
+    assert.equal((await call('press', code, a.token)).status, 409);
     assert.equal((await call('rename-team', code, a.token, { teamName: 'знатоки' })).status, 409);
     assert.equal((await call('rename-team', code, a.token, { teamName: 'Гром' })).data.players.find(p => p.id === ended.players[0].id).name, 'Гром');
     assert.equal((await call('display', code)).data.players[0].name, 'Гром');
