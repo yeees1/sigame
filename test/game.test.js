@@ -20,7 +20,8 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 0, roundSeconds: 40 })).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 15, roundSeconds: 601 })).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 1.5, roundSeconds: 40 })).status, 400);
-    const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 9, roundSeconds: 55 })).data;
+    assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', prepSeconds: 0 })).status, 400);
+    const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', prepSeconds: 7, answerSeconds: 9, roundSeconds: 55 })).data;
     const code = created.code;
     assert.match(code, /^[A-Z0-9]{5}$/);
     assert.equal((await call('admin-login', code, null, { password: 'wrong-password' })).status, 401);
@@ -28,22 +29,29 @@ test('ведущий и две команды проходят раунды с �
     const recovered = (await call('admin-login', code, null, { password: 'strong-password' })).data;
     assert.equal(recovered.token, created.token);
     assert.equal((await call('state', code, recovered.token)).data.role, 'admin');
+    assert.equal((await call('state', code, recovered.token)).data.prepSeconds, 7);
     assert.equal((await call('state', code, recovered.token)).data.answerSeconds, 9);
     assert.equal((await call('state', code, recovered.token)).data.roundSeconds, 55);
     assert.equal('password' in recovered, false);
     assert.equal('passwordHash' in (await call('state', code, recovered.token)).data, false);
     assert.equal((await call('display', code)).data.title, 'Большой квиз');
+    assert.equal((await call('display', code)).data.prepSeconds, 7);
     assert.equal((await call('display', code)).data.roundSeconds, 55);
     assert.equal((await call('join', 'XXXXX', null, { teamName: 'Ошибка' })).status, 404);
     const a = (await call('join', code, null, { teamName: 'Молния' })).data;
     const b = (await call('join', code, null, { teamName: 'Знатоки' })).data;
     assert.equal((await call('join', code, null, { teamName: 'молния' })).status, 409);
     assert.equal((await call('start-game', code, recovered.token)).data.phase, 'ready');
-    assert.equal((await call('start-answer', code, created.token)).data.phase, 'preparing');
+    assert.equal((await call('start-answer', code, created.token, { prepSeconds: 601 })).status, 400);
+    assert.equal((await call('state', code, created.token)).data.phase, 'ready');
+    assert.equal((await call('start-answer', code, created.token, { prepSeconds: 6 })).data.phase, 'preparing');
+    assert.equal((await call('state', code, a.token)).data.prepSeconds, 6);
+    assert.equal((await call('display', code)).data.prepSeconds, 6);
     const rejoined = (await call('admin-login', code, null, { password: 'strong-password' })).data;
     assert.equal((await call('state', code, rejoined.token)).data.phase, 'preparing');
     assert.equal((await call('press', code, a.token)).status, 409);
     const room = rooms.get(code);
+    assert.ok(room.prepUntil - Date.now() > 5000 && room.prepUntil - Date.now() <= 6000);
     assert.equal(room.answerRemainingMs, 55000);
     room.prepUntil = Date.now() - 1;
     assert.equal((await call('state', code, a.token)).data.phase, 'open');
@@ -73,7 +81,9 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('end', code, created.token)).data.phase, 'ended');
     assert.equal((await call('next', code, created.token)).data.round, 2);
     assert.equal((await call('state', code, a.token)).data.players.find(p => p.name === 'Молния').pressed, false);
-    await call('start-answer', code, created.token);
+    await call('start-answer', code, created.token, { prepSeconds: 4 });
+    assert.equal(room.prepSeconds, 4);
+    assert.ok(room.prepUntil - Date.now() > 3000 && room.prepUntil - Date.now() <= 4000);
     assert.equal(room.answerRemainingMs, 55000);
     room.prepUntil = Date.now() - 1;
     await call('state', code, created.token);
@@ -94,6 +104,7 @@ test('ведущий и две команды проходят раунды с �
     assert.equal('queue' in ended, false);
     assert.equal((await call('next', code, created.token)).data.round, 3);
     await call('start-answer', code, created.token);
+    assert.equal(room.prepSeconds, 4);
     room.prepUntil = Date.now() - 1;
     await call('state', code, created.token);
     assert.equal((await call('end', code, b.token)).status, 403);
@@ -117,6 +128,7 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('display', code)).data.phase, 'finished');
 
     const second = (await call('create', null, null, { title: 'Вторая игра', password: 'strong-password' })).data;
+    assert.equal((await call('state', second.code, second.token)).data.prepSeconds, 10);
     assert.equal((await call('state', second.code, second.token)).data.answerSeconds, 15);
     assert.equal((await call('state', second.code, second.token)).data.roundSeconds, 40);
     const guest = (await call('join', second.code, null, { teamName: 'Гости' })).data;

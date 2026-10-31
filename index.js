@@ -48,7 +48,7 @@ function snapshot(room, auth) {
   if (!admin && !player) return null;
   return {
     code: room.code, title: room.title, role: admin ? 'admin' : 'player', me: player?.id,
-    phase: room.phase, round: room.round, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds, serverNow: now(),
+    phase: room.phase, round: room.round, prepSeconds: room.prepSeconds, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds, serverNow: now(),
     prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs, speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
     players: room.players.map(p => ({ id: p.id, name: p.name, connected: now() - p.lastSeen < 5000, pressed: p.pressed }))
@@ -56,7 +56,7 @@ function snapshot(room, auth) {
 }
 function displaySnapshot(room) {
   advance(room);
-  return { code: room.code, title: room.title, role: 'display', phase: room.phase, round: room.round, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds,
+  return { code: room.code, title: room.title, role: 'display', phase: room.phase, round: room.round, prepSeconds: room.prepSeconds, answerSeconds: room.answerSeconds, roundSeconds: room.roundSeconds,
     serverNow: now(), prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs,
     speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
@@ -83,12 +83,14 @@ async function api(req, res, url) {
     if (!title) return fail(res, 400, 'Введите название игры');
     const password = body.password;
     if (typeof password !== 'string' || password.length < 8 || password.length > 128) return fail(res, 400, 'Пароль должен содержать от 8 до 128 символов');
+    const prepSeconds = body.prepSeconds === undefined ? 10 : body.prepSeconds;
     const answerSeconds = body.answerSeconds === undefined ? 15 : body.answerSeconds;
     const roundSeconds = body.roundSeconds === undefined ? 40 : body.roundSeconds;
+    if (!Number.isInteger(prepSeconds) || prepSeconds < 1 || prepSeconds > 600) return fail(res, 400, 'Время подготовки: от 1 до 600 секунд');
     if (!Number.isInteger(answerSeconds) || answerSeconds < 1 || answerSeconds > 600) return fail(res, 400, 'Время ответа: от 1 до 600 секунд');
     if (!Number.isInteger(roundSeconds) || roundSeconds < 1 || roundSeconds > 600) return fail(res, 400, 'Время раунда: от 1 до 600 секунд');
     const salt = crypto.randomBytes(16);
-    const room = { code: makeCode(), title, answerSeconds, roundSeconds, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, answerRemainingMs: null, speakerUntil: null, speaker: null, timer: null };
+    const room = { code: makeCode(), title, prepSeconds, answerSeconds, roundSeconds, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, answerRemainingMs: null, speakerUntil: null, speaker: null, timer: null };
     rooms.set(room.code, room);
     return send(res, 200, { code: room.code, title, token: room.adminToken });
   }
@@ -172,7 +174,10 @@ async function api(req, res, url) {
   } else if (url.pathname === '/api/start-game' && room.phase === 'lobby' && room.players.length) {
     room.phase = 'ready'; room.round = 1;
   } else if (url.pathname === '/api/start-answer' && room.phase === 'ready' && room.players.length) {
-    room.phase = 'preparing'; room.prepUntil = now() + 10000; room.answerRemainingMs = room.roundSeconds * 1000; schedule(room);
+    const prepSeconds = body.prepSeconds === undefined ? room.prepSeconds : body.prepSeconds;
+    if (!Number.isInteger(prepSeconds) || prepSeconds < 1 || prepSeconds > 600) return fail(res, 400, 'Время подготовки: от 1 до 600 секунд');
+    room.prepSeconds = prepSeconds;
+    room.phase = 'preparing'; room.prepUntil = now() + room.prepSeconds * 1000; room.answerRemainingMs = room.roundSeconds * 1000; schedule(room);
   } else if (url.pathname === '/api/finish-answer' && room.phase === 'speaking') {
     room.phase = 'speaker-finished'; room.speakerUntil = null; schedule(room);
   } else if (url.pathname === '/api/continue' && room.phase === 'speaker-finished') {
