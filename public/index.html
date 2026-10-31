@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101019">
+  <meta name="description" content="Пульс — живая викторина для команд.">
+  <title>Пульс — живая викторина</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar wrap">
+    <a class="brand" href="/" aria-label="Пульс — главная"><span class="brand-mark">✳</span><span>ПУЛЬС<span class="brand-dot">.</span></span></a>
+    <div class="top-right"><span class="live-dot"></span><span>ЖИВАЯ ВИКТОРИНА</span></div>
+  </header>
+  <div id="connection" class="connection" role="status" hidden>Соединение потеряно. Восстанавливаем связь…</div>
+  <main id="app" class="wrap" aria-live="polite"></main>
+  <dialog id="rename-dialog" class="rename-dialog" aria-labelledby="rename-title">
+    <form id="rename-form">
+      <div class="eyebrow">НАСТРОЙКИ КОМАНДЫ</div>
+      <h2 id="rename-title">Сменить название</h2>
+      <label class="field"><span>Название команды</span><input name="teamName" maxlength="32" required autocomplete="off"></label>
+      <p class="error" role="alert"></p>
+      <div class="control-row"><button class="btn btn-ghost" type="button" data-action="close-rename">Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
+    </form>
+  </dialog>
+  <footer class="footer wrap"><span>СОЗДАНО ДЛЯ МОМЕНТА, КОГДА ЗНАЕШЬ ОТВЕТ.</span><span>01 / ∞</span></footer>
+</body>
+</html>

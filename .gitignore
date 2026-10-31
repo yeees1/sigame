@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.idea/
+.omx/
+.DS_Store
+*.log
+coverage/

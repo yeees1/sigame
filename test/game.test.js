@@ -1,0 +1,117 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { server, rooms } = require('../index');
+
+test('ведущий и две команды проходят два раунда без очереди ответов', async () => {
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function call(route, code, token, body = {}) {
+    const response = await fetch(`${base}/api/${route}${route === 'state' || route === 'display' ? `?code=${code}` : ''}`, {
+      method: route === 'state' || route === 'display' ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      ...(['state', 'display'].includes(route) ? {} : { body: JSON.stringify({ code, ...body }) })
+    });
+    return { status: response.status, data: await response.json() };
+  }
+  try {
+    assert.equal((await call('create')).status, 400);
+    assert.equal((await call('create', null, null, { title: 'Большой квиз' })).status, 400);
+    assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'short' })).status, 400);
+    const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password' })).data;
+    const code = created.code;
+    assert.match(code, /^[A-Z0-9]{5}$/);
+    assert.equal((await call('admin-login', code, null, { password: 'wrong-password' })).status, 401);
+    assert.equal((await call('admin-login', 'XXXXX', null, { password: 'strong-password' })).status, 404);
+    const recovered = (await call('admin-login', code, null, { password: 'strong-password' })).data;
+    assert.equal(recovered.token, created.token);
+    assert.equal((await call('state', code, recovered.token)).data.role, 'admin');
+    assert.equal('password' in recovered, false);
+    assert.equal('passwordHash' in (await call('state', code, recovered.token)).data, false);
+    assert.equal((await call('display', code)).data.title, 'Большой квиз');
+    assert.equal((await call('join', 'XXXXX', null, { teamName: 'Ошибка' })).status, 404);
+    const a = (await call('join', code, null, { teamName: 'Молния' })).data;
+    const b = (await call('join', code, null, { teamName: 'Знатоки' })).data;
+    assert.equal((await call('join', code, null, { teamName: 'молния' })).status, 409);
+    assert.equal((await call('start-game', code, recovered.token)).data.phase, 'ready');
+    assert.equal((await call('start-answer', code, created.token)).data.phase, 'preparing');
+    const rejoined = (await call('admin-login', code, null, { password: 'strong-password' })).data;
+    assert.equal((await call('state', code, rejoined.token)).data.phase, 'preparing');
+    assert.equal((await call('press', code, a.token)).status, 409);
+    const room = rooms.get(code);
+    room.prepUntil = Date.now() - 1;
+    assert.equal((await call('state', code, a.token)).data.phase, 'open');
+    assert.equal((await call('press', code, a.token)).data.speaker, 'Молния');
+    assert.equal((await call('press', code, a.token)).status, 409);
+    assert.equal((await call('press', code, b.token)).status, 409);
+    room.speakerUntil = Date.now() - 1;
+    assert.equal((await call('state', code, created.token)).data.phase, 'speaker-finished');
+    assert.equal((await call('press', code, b.token)).status, 409);
+    assert.equal((await call('continue', code, created.token)).data.phase, 'open');
+    assert.equal((await call('press', code, a.token)).status, 409);
+    assert.equal((await call('press', code, b.token)).data.speaker, 'Знатоки');
+    assert.equal((await call('display', code)).data.speaker, 'Знатоки');
+    room.speakerUntil = Date.now() - 1;
+    await call('state', code, created.token);
+    assert.equal((await call('end', code, created.token)).data.phase, 'ended');
+    assert.equal((await call('next', code, created.token)).data.round, 2);
+    assert.equal((await call('state', code, a.token)).data.players.find(p => p.name === 'Молния').pressed, false);
+    await call('start-answer', code, created.token);
+    room.prepUntil = Date.now() - 1;
+    await call('state', code, created.token);
+    assert.equal((await call('press', code, b.token)).data.speaker, 'Знатоки');
+    room.answerUntil = Date.now() - 1;
+    const ended = (await call('state', code, created.token)).data;
+    assert.equal(ended.phase, 'ended');
+    assert.equal('queue' in ended, false);
+    assert.equal((await call('rename-team', code, a.token, { teamName: 'знатоки' })).status, 409);
+    assert.equal((await call('rename-team', code, a.token, { teamName: 'Гром' })).data.players.find(p => p.id === ended.players[0].id).name, 'Гром');
+    assert.equal((await call('display', code)).data.players[0].name, 'Гром');
+    assert.equal((await call('leave', code, a.token)).status, 200);
+    assert.equal((await call('state', code, a.token)).status, 401);
+    assert.equal((await call('state', code, created.token)).data.players.length, 1);
+
+    const finished = (await call('finish-game', code, created.token)).data;
+    assert.equal(finished.phase, 'finished');
+    assert.equal((await call('next', code, created.token)).status, 409);
+    assert.equal((await call('join', code, null, { teamName: 'Поздняя команда' })).status, 409);
+    assert.equal((await call('state', code, b.token)).data.phase, 'finished');
+    assert.equal((await call('display', code)).data.phase, 'finished');
+
+    const second = (await call('create', null, null, { title: 'Вторая игра', password: 'strong-password' })).data;
+    const guest = (await call('join', second.code, null, { teamName: 'Гости' })).data;
+    await call('start-game', second.code, second.token);
+    await call('start-answer', second.code, second.token);
+    const stopped = (await call('finish-game', second.code, second.token)).data;
+    assert.equal(stopped.phase, 'finished');
+    assert.equal(stopped.prepUntil, null);
+    assert.equal(stopped.answerUntil, null);
+    assert.equal((await call('press', second.code, guest.token)).status, 409);
+    assert.equal((await call('start-answer', second.code, second.token)).status, 409);
+
+    const empty = (await call('create', null, null, { title: 'Пустая игра', password: 'strong-password' })).data;
+    assert.equal((await call('finish-game', empty.code, empty.token)).data.phase, 'finished');
+    for (let i = 0; i < 10; i++) assert.equal((await call('admin-login', empty.code, null, { password: 'wrong-password' })).status, 401);
+    assert.equal((await call('admin-login', empty.code, null, { password: 'strong-password' })).status, 429);
+
+    const active = (await call('create', null, null, { title: 'Выход во время ответа', password: 'strong-password' })).data;
+    const first = (await call('join', active.code, null, { teamName: 'Первые' })).data;
+    const waiting = (await call('join', active.code, null, { teamName: 'Вторые' })).data;
+    await call('start-game', active.code, active.token);
+    await call('start-answer', active.code, active.token);
+    rooms.get(active.code).prepUntil = Date.now() - 1;
+    await call('state', active.code, active.token);
+    await call('press', active.code, first.token);
+    assert.equal((await call('press', active.code, waiting.token)).status, 409);
+    await call('leave', active.code, first.token);
+    const afterLeave = (await call('state', active.code, active.token)).data;
+    assert.equal(afterLeave.phase, 'speaker-finished');
+    assert.equal(afterLeave.speaker, null);
+    assert.equal((await call('press', active.code, waiting.token)).status, 409);
+    assert.equal((await call('continue', active.code, active.token)).data.phase, 'open');
+    assert.equal((await call('press', active.code, waiting.token)).data.speaker, 'Вторые');
+  } finally {
+    for (const room of rooms.values()) clearTimeout(room.timer);
+    await new Promise(resolve => server.close(resolve));
+    rooms.clear();
+  }
+});
