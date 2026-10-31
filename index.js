@@ -175,8 +175,12 @@ async function api(req, res, url) {
     room.phase = 'ready'; room.round = 1;
   } else if (url.pathname === '/api/start-answer' && room.phase === 'ready' && room.players.length) {
     const prepSeconds = body.prepSeconds === undefined ? room.prepSeconds : body.prepSeconds;
+    const answerSeconds = body.answerSeconds === undefined ? room.answerSeconds : body.answerSeconds;
+    const roundSeconds = body.roundSeconds === undefined ? room.roundSeconds : body.roundSeconds;
     if (!Number.isInteger(prepSeconds) || prepSeconds < 1 || prepSeconds > 600) return fail(res, 400, 'Время подготовки: от 1 до 600 секунд');
-    room.prepSeconds = prepSeconds;
+    if (!Number.isInteger(answerSeconds) || answerSeconds < 1 || answerSeconds > 600) return fail(res, 400, 'Время ответа: от 1 до 600 секунд');
+    if (!Number.isInteger(roundSeconds) || roundSeconds < 1 || roundSeconds > 600) return fail(res, 400, 'Время раунда: от 1 до 600 секунд');
+    room.prepSeconds = prepSeconds; room.answerSeconds = answerSeconds; room.roundSeconds = roundSeconds;
     room.phase = 'preparing'; room.prepUntil = now() + room.prepSeconds * 1000; room.answerRemainingMs = room.roundSeconds * 1000; schedule(room);
   } else if (url.pathname === '/api/finish-answer' && room.phase === 'speaking') {
     room.phase = 'speaker-finished'; room.speakerUntil = null; schedule(room);
