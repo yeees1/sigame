@@ -84,8 +84,8 @@ function stageData() {
     case 'ready': return ['ВОПРОС У ВЕДУЩЕГО', `Раунд <em>${state.round}</em>`, 'Ведущий зачитывает вопрос вслух. Команды готовятся отвечать.'];
     case 'preparing': return ['ПОДГОТОВКА', 'Приготовьтесь<br>к <em>ответу</em>', 'Кнопка откроется одновременно для всех через 10 секунд.'];
     case 'open': return ['ПРИЁМ ОТВЕТОВ', 'Время <em>нажимать</em>', 'Первая нажавшая команда получает право ответить.'];
-    case 'speaking': return ['ОТВЕЧАЕТ КОМАНДА', escapeHtml(state.speaker), 'Слушаем ответ команды. Нажатия временно закрыты.'];
-    case 'speaker-finished': return ['ВРЕМЯ ОТВЕТА ИСТЕКЛО', state.speaker ? escapeHtml(state.speaker) : 'Команда вышла', 'Ведущий решает: снова открыть нажатия или завершить раунд.'];
+    case 'speaking': return ['ОТВЕЧАЕТ КОМАНДА', escapeHtml(state.speaker), `Слушаем ответ команды. Приём нажатий на паузе, осталось ${Math.ceil(state.answerRemainingMs / 1000)} с.`];
+    case 'speaker-finished': return ['ВРЕМЯ ОТВЕТА ИСТЕКЛО', state.speaker ? escapeHtml(state.speaker) : 'Команда вышла', `Ведущий выбирает: продолжить приём нажатий (${Math.ceil(state.answerRemainingMs / 1000)} с) или завершить раунд.`];
     case 'finished': return ['ИГРА ЗАВЕРШЕНА', 'Спасибо за <em>игру</em>', 'Ведущий завершил игру. Ответы больше не принимаются.'];
     default: return ['РАУНД ЗАВЕРШЁН', 'Пауза между<br><em>раундами</em>', 'Все нажатия этого раунда закрыты.'];
   }
@@ -95,7 +95,7 @@ function game() {
   const admin = state.role === 'admin';
   const display = state.role === 'display';
   const me = state.players?.find(p => p.id === state.me);
-  const timerDeadline = state.phase === 'preparing' ? state.prepUntil : state.phase === 'speaking' ? state.speakerUntil : state.answerUntil;
+  const timerDeadline = state.phase === 'preparing' ? state.prepUntil : state.phase === 'speaking' ? state.speakerUntil : state.phase === 'open' ? state.answerUntil : null;
   const showAnswer = !admin && !display && state.phase === 'open';
   const action = admin ? (state.phase === 'ready' ? button('Начать ответ →', 'start-answer', true, !state.players.length) : state.phase === 'speaker-finished' ? `${button('Продолжить ответ →', 'continue', true)}${button('Завершить раунд', 'end')}` : state.phase === 'ended' ? button('Следующий раунд →', 'next', true) : '') : '';
   const gameActions = state.phase === 'finished' ? (admin ? button('Создать новую игру →', 'create', true) : button('На главную →', 'leave', true)) : admin ? `${action}${button('Завершить игру', 'finish-game')}` : `${button('Сменить название команды', 'rename-team')}${button('Выйти из игры', 'leave')}`;

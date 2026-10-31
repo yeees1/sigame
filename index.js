@@ -33,8 +33,8 @@ function advance(room) {
   if (room.phase === 'preparing' && time >= room.prepUntil) {
     room.phase = 'open'; room.answerUntil = room.prepUntil + 40000; room.prepUntil = null; changed = true;
   }
-  if (room.answerUntil && time >= room.answerUntil && room.phase !== 'ended') {
-    room.phase = 'ended'; room.answerUntil = null; room.speakerUntil = null; room.speaker = null; changed = true;
+  if (room.phase === 'open' && room.answerUntil && time >= room.answerUntil) {
+    room.phase = 'ended'; room.answerUntil = null; room.answerRemainingMs = 0; changed = true;
   } else if (room.phase === 'speaking' && time >= room.speakerUntil) {
     room.phase = 'speaker-finished'; room.speakerUntil = null; changed = true;
   }
@@ -49,7 +49,7 @@ function snapshot(room, auth) {
   return {
     code: room.code, title: room.title, role: admin ? 'admin' : 'player', me: player?.id,
     phase: room.phase, round: room.round, serverNow: now(),
-    prepUntil: room.prepUntil, answerUntil: room.answerUntil, speakerUntil: room.speakerUntil,
+    prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs, speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
     players: room.players.map(p => ({ id: p.id, name: p.name, connected: now() - p.lastSeen < 5000, pressed: p.pressed }))
   };
@@ -57,7 +57,7 @@ function snapshot(room, auth) {
 function displaySnapshot(room) {
   advance(room);
   return { code: room.code, title: room.title, role: 'display', phase: room.phase, round: room.round,
-    serverNow: now(), prepUntil: room.prepUntil, answerUntil: room.answerUntil,
+    serverNow: now(), prepUntil: room.prepUntil, answerUntil: room.answerUntil, answerRemainingMs: room.answerRemainingMs,
     speakerUntil: room.speakerUntil,
     speaker: room.players.find(p => p.id === room.speaker)?.name || null,
     players: room.players.map(p => ({ name: p.name })) };
@@ -84,7 +84,7 @@ async function api(req, res, url) {
     const password = body.password;
     if (typeof password !== 'string' || password.length < 8 || password.length > 128) return fail(res, 400, 'Пароль должен содержать от 8 до 128 символов');
     const salt = crypto.randomBytes(16);
-    const room = { code: makeCode(), title, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, speakerUntil: null, speaker: null, timer: null };
+    const room = { code: makeCode(), title, adminToken: token(), passwordSalt: salt, passwordHash: passwordHash(password, salt), loginAttempts: new Map(), players: [], listeners: new Set(), phase: 'lobby', round: 0, prepUntil: null, answerUntil: null, answerRemainingMs: null, speakerUntil: null, speaker: null, timer: null };
     rooms.set(room.code, room);
     return send(res, 200, { code: room.code, title, token: room.adminToken });
   }
@@ -156,25 +156,26 @@ async function api(req, res, url) {
     if (room.phase !== 'open' || !room.answerUntil) return fail(res, 409, 'Приём ответов закрыт');
     if (player.pressed) return fail(res, 409, 'Ваша команда уже нажала в этом раунде');
     player.pressed = true;
+    room.answerRemainingMs = Math.max(0, room.answerUntil - now()); room.answerUntil = null;
     room.phase = 'speaking'; room.speaker = player.id; room.speakerUntil = now() + 15000; schedule(room);
     broadcast(room);
     return send(res, 200, snapshot(room, auth));
   }
   if (!admin) return fail(res, 403, 'Только для администратора');
   if (url.pathname === '/api/finish-game' && room.phase !== 'finished') {
-    room.phase = 'finished'; room.prepUntil = null; room.answerUntil = null;
+    room.phase = 'finished'; room.prepUntil = null; room.answerUntil = null; room.answerRemainingMs = null;
     room.speakerUntil = null; room.speaker = null; schedule(room);
   } else if (url.pathname === '/api/start-game' && room.phase === 'lobby' && room.players.length) {
     room.phase = 'ready'; room.round = 1;
   } else if (url.pathname === '/api/start-answer' && room.phase === 'ready' && room.players.length) {
-    room.phase = 'preparing'; room.prepUntil = now() + 10000; schedule(room);
+    room.phase = 'preparing'; room.prepUntil = now() + 10000; room.answerRemainingMs = 40000; schedule(room);
   } else if (url.pathname === '/api/continue' && room.phase === 'speaker-finished') {
-    room.phase = 'open'; room.speaker = null;
+    room.phase = 'open'; room.speaker = null; room.answerUntil = now() + room.answerRemainingMs;
     schedule(room);
   } else if (url.pathname === '/api/end' && room.phase === 'speaker-finished') {
-    room.phase = 'ended'; room.speaker = null; room.answerUntil = null; schedule(room);
+    room.phase = 'ended'; room.speaker = null; room.answerUntil = null; room.answerRemainingMs = 0; schedule(room);
   } else if (url.pathname === '/api/next' && room.phase === 'ended') {
-    room.phase = 'ready'; room.round += 1; room.speaker = null;
+    room.phase = 'ready'; room.round += 1; room.speaker = null; room.answerRemainingMs = null;
     for (const p of room.players) p.pressed = false;
   } else return fail(res, 409, 'Действие сейчас недоступно');
   broadcast(room); send(res, 200, snapshot(room, auth));
