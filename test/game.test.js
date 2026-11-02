@@ -14,6 +14,8 @@ test('ведущий и две команды проходят раунды с �
     return { status: response.status, data: await response.json() };
   }
   try {
+    const health = async () => (await fetch(`${base}/health`)).json();
+    assert.equal((await health()).activeGames, 0);
     assert.equal((await call('create')).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз' })).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'short' })).status, 400);
@@ -22,6 +24,7 @@ test('ведущий и две команды проходят раунды с �
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', answerSeconds: 1.5, roundSeconds: 40 })).status, 400);
     assert.equal((await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', prepSeconds: 0 })).status, 400);
     const created = (await call('create', null, null, { title: 'Большой квиз', password: 'strong-password', prepSeconds: 7, answerSeconds: 9, roundSeconds: 55 })).data;
+    assert.equal((await health()).activeGames, 1);
     const code = created.code;
     assert.match(code, /^[A-Z0-9]{5}$/);
     assert.equal((await call('admin-login', code, null, { password: 'wrong-password' })).status, 401);
@@ -143,6 +146,7 @@ test('ведущий и две команды проходят раунды с �
 
     const finished = (await call('finish-game', code, created.token)).data;
     assert.equal(finished.phase, 'finished');
+    assert.equal((await health()).activeGames, 0);
     assert.equal((await call('join', code, null, { teamName: 'Поздняя команда' })).status, 409);
     assert.equal((await call('state', code, b.token)).data.phase, 'finished');
     assert.equal((await call('display', code)).data.phase, 'finished');

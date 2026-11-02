@@ -201,7 +201,7 @@ async function api(req, res, url) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname === '/health') return send(res, 200, { ok: true });
+  if (url.pathname === '/health') return send(res, 200, { ok: true, activeGames: [...rooms.values()].filter(room => room.phase !== 'finished').length });
   if (url.pathname.startsWith('/api/')) {
     try { await api(req, res, url); } catch (error) { console.error(error); if (!res.headersSent) fail(res, 500, 'Ошибка сервера'); }
     return;

@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sigame-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: vars.AUTO_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub secret: $name" >&2
+              exit 1
+            fi
+          done
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/sigame_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/sigame_deploy ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        run: |
+          ssh -i ~/.ssh/sigame_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "bash -se -- $GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/apps/sigame
+
+          active_games() {
+            docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/health').then(r => r.json()).then(s => { if (!Number.isInteger(s.activeGames)) process.exit(2); console.log(s.activeGames); }).catch(() => process.exit(2))"
+          }
+          check_idle() {
+            local count
+            if ! count=$(active_games); then
+              echo 'Cannot check active games. Update the server manually once before enabling autodeploy.' >&2
+              exit 1
+            fi
+            if [ "$count" -ne 0 ]; then
+              echo "Deployment postponed: $count active game(s). Finish them and rerun this workflow." >&2
+              exit 1
+            fi
+          }
+
+          check_idle
+          git diff --quiet
+          git diff --cached --quiet
+          git fetch origin main
+          git merge --ff-only "$1"
+          test "$(git rev-parse HEAD)" = "$1"
+          docker compose build app
+          check_idle
+          docker compose up -d --no-build --wait --wait-timeout 120
+          docker compose ps
+          REMOTE
