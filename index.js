@@ -27,6 +27,12 @@ function schedule(room) {
   const deadlines = [room.prepUntil, room.answerUntil, room.speakerUntil].filter(Boolean);
   if (deadlines.length) room.timer = setTimeout(() => { advance(room); broadcast(room); }, Math.max(0, Math.min(...deadlines) - now()) + 1);
 }
+function nextRound(room) {
+  room.phase = 'ready'; room.round += 1;
+  room.prepUntil = null; room.answerUntil = null; room.answerRemainingMs = null;
+  room.speakerUntil = null; room.speaker = null;
+  for (const player of room.players) player.pressed = false;
+}
 function advance(room) {
   const time = now();
   let changed = false;
@@ -34,7 +40,7 @@ function advance(room) {
     room.phase = 'open'; room.answerUntil = room.prepUntil + room.roundSeconds * 1000; room.prepUntil = null; changed = true;
   }
   if (room.phase === 'open' && room.answerUntil && time >= room.answerUntil) {
-    room.phase = 'ended'; room.answerUntil = null; room.answerRemainingMs = 0; changed = true;
+    nextRound(room); changed = true;
   } else if (room.phase === 'speaking' && time >= room.speakerUntil) {
     room.phase = 'speaker-finished'; room.speakerUntil = null; changed = true;
   }
@@ -188,10 +194,7 @@ async function api(req, res, url) {
     room.phase = 'open'; room.speaker = null; room.answerUntil = now() + room.answerRemainingMs;
     schedule(room);
   } else if (url.pathname === '/api/end' && (room.phase === 'open' || room.phase === 'speaker-finished')) {
-    room.phase = 'ended'; room.speaker = null; room.answerUntil = null; room.answerRemainingMs = 0; schedule(room);
-  } else if (url.pathname === '/api/next' && room.phase === 'ended') {
-    room.phase = 'ready'; room.round += 1; room.speaker = null; room.answerRemainingMs = null;
-    for (const p of room.players) p.pressed = false;
+    nextRound(room); schedule(room);
   } else return fail(res, 409, 'Действие сейчас недоступно');
   broadcast(room); send(res, 200, snapshot(room, auth));
 }
